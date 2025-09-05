@@ -1196,11 +1196,279 @@
             alert('✅ ข้อมูลถูก Export เรียบร้อยแล้ว! รวม URLs ทั้งหมด ' + dataToExport.summary.totalUrls + ' ลิงก์');
         }
 
+        // LocalStorage Management
+        const STORAGE_KEY = 'ioc_dashboard_data_v2';
+
+        function saveToStorage() {
+            try {
+                const dataToSave = {
+                    version: '2.0',
+                    lastUpdate: new Date().toISOString(),
+                    data: iocData
+                };
+                localStorage.setItem(STORAGE_KEY, JSON.stringify(dataToSave));
+                console.log('✅ Auto-saved to localStorage');
+            } catch (error) {
+                console.error('❌ Failed to save to localStorage:', error);
+            }
+        }
+
+        function loadFromStorage() {
+            try {
+                const savedData = localStorage.getItem(STORAGE_KEY);
+                if (savedData) {
+                    const parsedData = JSON.parse(savedData);
+                    
+                    if (parsedData.version && parsedData.data) {
+                        // Merge saved data with default data structure
+                        parsedData.data.forEach(savedIOC => {
+                            const existingIOC = iocData.find(ioc => ioc.id === savedIOC.id);
+                            if (existingIOC) {
+                                // Preserve all saved properties
+                                existingIOC.completed = savedIOC.completed || false;
+                                existingIOC.urls = savedIOC.urls || [];
+                                // Keep any additional properties that might have been saved
+                                Object.keys(savedIOC).forEach(key => {
+                                    if (!['id', 'number', 'title', 'type', 'date', 'priority'].includes(key)) {
+                                        existingIOC[key] = savedIOC[key];
+                                    }
+                                });
+                            }
+                        });
+                        
+                        console.log('✅ Data loaded from localStorage');
+                        showNotification('💾 โหลดข้อมูลจาก localStorage สำเร็จ!');
+                        return true;
+                    }
+                }
+            } catch (error) {
+                console.error('❌ Failed to load from localStorage:', error);
+            }
+            return false;
+        }
+
+        function clearStorage() {
+            if (confirm('🗑️ ต้องการล้างข้อมูลทั้งหมดหรือไม่?\n\n⚠️ การกระทำนี้ไม่สามารถย้อนกลับได้!')) {
+                localStorage.removeItem(STORAGE_KEY);
+                
+                // Reset all data to default
+                iocData.forEach(ioc => {
+                    ioc.completed = false;
+                    ioc.urls = [];
+                });
+                
+                renderIOCs();
+                showNotification('🗑️ ล้างข้อมูลเรียบร้อย!');
+            }
+        }
+
+        function getStorageInfo() {
+            try {
+                const savedData = localStorage.getItem(STORAGE_KEY);
+                if (savedData) {
+                    const parsedData = JSON.parse(savedData);
+                    const sizeInBytes = new Blob([savedData]).size;
+                    const sizeInKB = (sizeInBytes / 1024).toFixed(2);
+                    
+                    return {
+                        exists: true,
+                        lastUpdate: parsedData.lastUpdate,
+                        version: parsedData.version,
+                        size: sizeInKB + ' KB',
+                        itemCount: parsedData.data ? parsedData.data.length : 0
+                    };
+                }
+            } catch (error) {
+                console.error('Error getting storage info:', error);
+            }
+            return { exists: false };
+        }
+
+        // Auto-save wrapper functions
+        function toggleCompleteWithSave(id) {
+            toggleComplete(id);
+            saveToStorage();
+        }
+
+        function addURLWithSave(iocId) {
+            addURL(iocId);
+            saveToStorage();
+        }
+
+        function editURLWithSave(iocId, index) {
+            editURL(iocId, index);
+            // Note: Save happens in saveURL function
+        }
+
+        function saveURLWithSave(iocId, index) {
+            saveURL(iocId, index);
+            saveToStorage();
+        }
+
+        function deleteURLWithSave(iocId, index) {
+            deleteURL(iocId, index);
+            saveToStorage();
+        }
+
+        // Override original functions to use auto-save versions
+        function toggleComplete(id) {
+            const ioc = iocData.find(item => item.id === id);
+            if (ioc) {
+                ioc.completed = !ioc.completed;
+                renderIOCs();
+                saveToStorage(); // Auto-save
+            }
+        }
+
+        function addURL(iocId) {
+            const input = document.getElementById(`urlInput-${iocId}`);
+            const url = input.value.trim();
+            
+            if (!url) {
+                alert('กรุณาใส่ URL');
+                return;
+            }
+
+            if (!isValidURL(url)) {
+                alert('กรุณาใส่ URL ที่ถูกต้อง');
+                return;
+            }
+
+            const ioc = iocData.find(item => item.id === iocId);
+            if (ioc) {
+                if (!ioc.urls) {
+                    ioc.urls = [];
+                }
+                
+                // Check for duplicates
+                if (ioc.urls.includes(url)) {
+                    alert('URL นี้มีอยู่แล้ว');
+                    return;
+                }
+                
+                ioc.urls.push(url);
+                input.value = '';
+                renderIOCs();
+                saveToStorage(); // Auto-save
+                
+                // Show success message
+                showNotification(`✅ เพิ่ม URL สำเร็จ! (${ioc.urls.length} ลิงก์)`);
+            }
+        }
+
+        function saveURL(iocId, index) {
+            const editInput = document.getElementById(`editInput-${iocId}-${index}`);
+            const newUrl = editInput.value.trim();
+            
+            if (!newUrl) {
+                alert('กรุณาใส่ URL');
+                return;
+            }
+
+            if (!isValidURL(newUrl)) {
+                alert('กรุณาใส่ URL ที่ถูกต้อง');
+                return;
+            }
+
+            const ioc = iocData.find(item => item.id === iocId);
+            if (ioc && ioc.urls) {
+                // Check for duplicates (excluding current URL)
+                const otherUrls = ioc.urls.filter((_, i) => i !== index);
+                if (otherUrls.includes(newUrl)) {
+                    alert('URL นี้มีอยู่แล้ว');
+                    return;
+                }
+                
+                ioc.urls[index] = newUrl;
+                editingUrl = null;
+                renderIOCs();
+                saveToStorage(); // Auto-save
+                showNotification('✅ แก้ไข URL สำเร็จ!');
+            }
+        }
+
+        function deleteURL(iocId, index) {
+            if (confirm('ต้องการลบ URL นี้หรือไม่?')) {
+                const ioc = iocData.find(item => item.id === iocId);
+                if (ioc && ioc.urls) {
+                    ioc.urls.splice(index, 1);
+                    renderIOCs();
+                    saveToStorage(); // Auto-save
+                    showNotification('🗑️ ลบ URL สำเร็จ!');
+                }
+            }
+        }
+
         // Event listeners
         document.getElementById('searchBox').addEventListener('input', searchIOCs);
 
+        // Add storage management to footer
+        function addStorageControls() {
+            const footer = document.querySelector('.footer');
+            const storageInfo = getStorageInfo();
+            
+            let storageStatusHTML = '';
+            if (storageInfo.exists) {
+                storageStatusHTML = `
+                    <div style="background: rgba(40, 167, 69, 0.1); padding: 15px; border-radius: 10px; margin: 20px 0;">
+                        <h4 style="color: #28a745; margin-bottom: 10px;">💾 LocalStorage Status</h4>
+                        <p style="margin: 5px 0; color: #666;">
+                            ✅ ข้อมูลถูกเก็บแล้ว | 
+                            📅 อัปเดตล่าสุด: ${new Date(storageInfo.lastUpdate).toLocaleString('th-TH')} | 
+                            📦 ขนาด: ${storageInfo.size} | 
+                            🔢 รายการ: ${storageInfo.itemCount}
+                        </p>
+                        <button class="export-btn" onclick="showStorageInfo()" style="background: #17a2b8; margin: 5px;">
+                            📊 ดูข้อมูล Storage
+                        </button>
+                        <button class="export-btn" onclick="clearStorage()" style="background: #dc3545; margin: 5px;">
+                            🗑️ ล้างข้อมูล
+                        </button>
+                    </div>
+                `;
+            } else {
+                storageStatusHTML = `
+                    <div style="background: rgba(255, 193, 7, 0.1); padding: 15px; border-radius: 10px; margin: 20px 0;">
+                        <h4 style="color: #ffc107; margin-bottom: 10px;">💾 LocalStorage Status</h4>
+                        <p style="margin: 5px 0; color: #666;">
+                            ⏳ ยังไม่มีข้อมูลที่บันทึก (ระบบจะ Auto-save อัตโนมัติ)
+                        </p>
+                    </div>
+                `;
+            }
+            
+            footer.insertAdjacentHTML('afterbegin', storageStatusHTML);
+        }
+
+        function showStorageInfo() {
+            const info = getStorageInfo();
+            if (info.exists) {
+                const completedCount = iocData.filter(ioc => ioc.completed).length;
+                const totalUrls = iocData.reduce((sum, ioc) => sum + (ioc.urls ? ioc.urls.length : 0), 0);
+                
+                alert(`📊 ข้อมูล LocalStorage\n\n` +
+                      `📅 อัปเดตล่าสุด: ${new Date(info.lastUpdate).toLocaleString('th-TH')}\n` +
+                      `📦 ขนาดไฟล์: ${info.size}\n` +
+                      `🔢 จำนวน IOCs: ${info.itemCount}\n` +
+                      `✅ เสร็จแล้ว: ${completedCount} รายการ\n` +
+                      `🔗 URLs รวม: ${totalUrls} ลิงก์\n\n` +
+                      `💡 ข้อมูลจะถูกบันทึกอัตโนมัติทุกครั้งที่มีการเปลี่ยนแปลง`);
+            }
+        }
+
         // Initialize the dashboard
+        loadFromStorage(); // Load from localStorage first
         renderIOCs();
+        
+        // Add storage controls to footer
+        setTimeout(() => {
+            addStorageControls();
+        }, 100);
+
+        // Auto-save on page unload (backup)
+        window.addEventListener('beforeunload', () => {
+            saveToStorage();
+        });
     </script>
 </body>
 </html>
